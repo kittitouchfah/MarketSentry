@@ -55,6 +55,8 @@ class SignalManager:
         self._thb_above_threshold: Optional[bool] = None
         # Track Max Pain crossover status (True if Spot >= Max Pain)
         self._max_pain_above: Optional[bool] = None
+        # Track VT drawdown status
+        self._vt_status: str = "normal"
 
     def check_apy_signal(self, symbol: str, apy: float) -> Optional[Dict[str, Any]]:
         """
@@ -239,6 +241,37 @@ class SignalManager:
             "max_pain": max_pain_price,
             "expiration": expiration,
             "direction": "above" if is_above else "below"
+        }
+
+    def check_vt_signal(self, drawdown: float) -> Optional[Dict[str, Any]]:
+        """
+        Check if VT ETF drawdown crossed a threshold.
+        """
+        if drawdown >= 35.0:
+            new_status = "drawdown_35"
+        elif drawdown >= 30.0:
+            new_status = "drawdown_30"
+        elif drawdown >= 20.0:
+            new_status = "drawdown_20"
+        else:
+            new_status = "normal"
+
+        if new_status == self._vt_status:
+            return None
+
+        cooldown_key = "vt_drawdown"
+        if not self._cooldown_passed(cooldown_key):
+            return None
+
+        old_status = self._vt_status
+        self._vt_status = new_status
+        self._last_alert[cooldown_key] = time.time()
+
+        return {
+            "type": "vt",
+            "drawdown": drawdown,
+            "old_status": old_status,
+            "new_status": new_status,
         }
 
     def _cooldown_passed(self, key: str) -> bool:

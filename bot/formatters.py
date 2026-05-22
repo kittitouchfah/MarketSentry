@@ -225,3 +225,103 @@ def format_polymarket_list(events: list, timestamp: str = None) -> str:
     return "\n".join(lines)
 
 
+def format_vt_signal(signal: dict, ath: float, price: float) -> str:
+    """Format a VT ETF Drawdown alert."""
+    now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
+    drawdown = signal["drawdown"]
+    status = signal["new_status"]
+    
+    action = "HOLD / Normal DCA"
+    if status == "drawdown_35":
+        action = "INVEST 30%"
+    elif status == "drawdown_30":
+        action = "INVEST 35%"
+    elif status == "drawdown_20":
+        action = "INVEST 25%"
+
+    return (
+        f"🚨 <b>VT ETF Drawdown Alert</b>\n"
+        f"\n"
+        f"  📉 Current Drawdown: <b>{drawdown:.2f}%</b>\n"
+        f"  💰 Current Price: <code>${price:.2f}</code>\n"
+        f"  🏔️ All-Time High: <code>${ath:.2f}</code>\n"
+        f"\n"
+        f"  💡 <b>Action:</b> {action}\n"
+        f"\n"
+        f"⏰ Last Updated: {now} (Bangkok)"
+    )
+
+
+def format_daily_report(
+    vix_val: float,
+    thb_rate: float,
+    vt_ath: float,
+    vt_price: float,
+    vt_drawdown: float,
+    fng_val: int,
+    fng_status: str,
+    pe_data: dict
+) -> str:
+    """Format the daily 7:00 AM market report."""
+    now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 1. VIX status
+    if vix_val > BotConfig.vix_super_fear:
+        vix_emoji, vix_label = "🔥", "SUPER FEAR"
+    elif vix_val > BotConfig.vix_fear:
+        vix_emoji, vix_label = "😰", "FEAR"
+    else:
+        vix_emoji, vix_label = "😌", "NORMAL"
+        
+    # 2. THB Status
+    thb_emoji = "🇹🇭"
+    
+    # 3. VT suggested action
+    vt_action = "HOLD / Normal DCA"
+    if vt_drawdown >= 35:
+        vt_action = "INVEST 30%"
+    elif vt_drawdown >= 30:
+        vt_action = "INVEST 35%"
+    elif vt_drawdown >= 20:
+        vt_action = "INVEST 25%"
+        
+    # 4. FNG status
+    fng_emoji = "😐"
+    if fng_status:
+        status_lower = fng_status.lower()
+        if "greed" in status_lower:
+            fng_emoji = "🤑"
+        elif "fear" in status_lower:
+            fng_emoji = "😱"
+            
+    # 5. World PE status
+    pe_emoji = "🌐"
+    pe_val_str = "N/A"
+    pe_status_str = "Unknown"
+    if pe_data:
+        pe_val_str = f"{pe_data.get('pe', 0.0):.2f}"
+        pe_status = pe_data.get('status', 'Unknown')
+        pe_status_str = pe_status
+        status_emoji = {
+            "Undervalued": "💎",
+            "Fairly Valued": "⚖️",
+            "Overvalued": "⚠️",
+            "Bubble": "💥",
+            "Expensive": "⚠️",
+        }
+        pe_emoji = status_emoji.get(pe_status, "🌐")
+
+    lines = [
+        "🌅 <b>Daily Market Report (7:00 AM)</b>",
+        "",
+        f"  {vix_emoji} <b>VIX Index:</b> <code>{vix_val:.2f}</code> ({vix_label})",
+        f"  {thb_emoji} <b>USD/THB:</b> <code>{thb_rate:.2f} ฿</code>",
+        f"  🌎 <b>VT ETF Drawdown:</b> <code>{vt_drawdown:.2f}%</code> (Suggested: <b>{vt_action}</b>)",
+        f"  🧭 <b>Crypto Fear & Greed:</b> <code>{fng_val}/100</code> ({fng_status})",
+        f"  {pe_emoji} <b>World Market PE:</b> <code>{pe_val_str}</code> ({pe_status_str})",
+        "",
+        f"⏰ Generated: {now} (Bangkok)"
+    ]
+    return "\n".join(lines)
+
+

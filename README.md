@@ -12,6 +12,8 @@ MarketSentry acts as a 24/7 sentinel—monitoring micro-level exchange price dif
 *   **📊 Spread & Funding Rate Monitor**: Calculates real-time spot-futures APY spreads and tracks funding rate trends.
 *   **🌍 Macro Market Sentiment**: Scrapes and tracks the Stock Market Volatility Index (VIX), World P/E Ratios, and the Crypto Fear & Greed Index.
 *   **🧠 Prediction & Options Metrics**: Integrates Polymarket crypto prediction market outcomes and monitors option Max Pain price targets.
+*   **🌎 VT ETF Drawdown Sentinel**: Tracks Vanguard Total World Stock ETF (VT) drawdown from its all-time high and provides tier-based investment advice.
+*   **🌅 Scheduled Market Reports**: Delivers a daily compiled report of VIX, USD/THB, VT, Fear & Greed, and World P/E directly to your chat at 7:00 AM.
 *   **⚙️ Runtime-Mutable Controls**: Control jobs (start/stop) and adjust alert thresholds directly from Telegram without restarting the engine.
 *   **💾 Database Integration**: Persists historical APY, USD/THB, and Option Max Pain snapshots to an SQLite database for trend analysis.
 
@@ -92,6 +94,8 @@ docker-compose up -d
 *   `/thb` — Check real-time USD/THB exchange rates.
 *   `/maxpain` — View BTC Option Max Pain price targets.
 *   `/poly [limit]` — Fetch live Polymarket crypto prediction odds.
+*   `/vt` — Show VT ETF price, all-time high, drawdown percentage, and suggested investment action.
+*   `/report` — Show the daily macro market report on demand.
 *   `/status` — View system health, live prices, poll rates, and engine status.
 
 ### Settings & Job Control

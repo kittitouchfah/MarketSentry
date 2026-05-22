@@ -24,7 +24,8 @@ from services.indicators import (
     get_fear_and_greed_index, 
     get_usd_thb_rate,
     get_all_max_pain,
-    get_polymarket_crypto_events
+    get_polymarket_crypto_events,
+    get_vt_drawdown
 )
 from services.signals import signal_manager
 from bot.formatters import (
@@ -37,6 +38,8 @@ from bot.formatters import (
     format_max_pain_list,
     format_max_pain_signal,
     format_polymarket_list,
+    format_vt_signal,
+    format_daily_report,
     thailand_tz
 )
 
@@ -72,6 +75,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /thb — Show real-time USD/THB exchange rate\n"
         "  /maxpain — Show BTC Options Max Pain\n"
         "  /poly [num] — Show Polymarket Crypto Predictions\n"
+        "  /vt — Show VT ETF Drawdown\n"
+        "  /report — Show Daily Market Report\n"
         "  /h — Show this help message\n\n"
         "<b>⚙️ Controls:</b>\n"
         "  /get — Show all current settings\n"
@@ -80,7 +85,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /start_job &lt;job&gt; — Resume a monitoring job\n"
         "  /status — Show system health\n\n"
         "<b>📝 Settable params:</b> apy, vix_fear, vix_super, cooldown, ticks, thb\n"
-        "<b>📝 Jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain"
+        "<b>📝 Jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -316,6 +321,32 @@ async def poly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+async def vt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show current VT ETF Drawdown."""
+    ath, price, drawdown, timestamp = get_vt_drawdown()
+    if ath == 0:
+        await update.message.reply_text("📭 Failed to fetch VT data.")
+        return
+        
+    action = "HOLD / Normal DCA"
+    if drawdown >= 35:
+        action = "INVEST 30%"
+    elif drawdown >= 30:
+        action = "INVEST 35%"
+    elif drawdown >= 20:
+        action = "INVEST 25%"
+        
+    text = (
+        f"🌎 <b>Vanguard Total World Stock (VT)</b>\n\n"
+        f"  📉 Drawdown from ATH: <b>{drawdown:.2f}%</b>\n"
+        f"  💰 Current Price: <code>${price:.2f}</code>\n"
+        f"  🏔️ All-Time High: <code>${ath:.2f}</code>\n\n"
+        f"  💡 <b>Suggested Action:</b> {action}\n\n"
+        f"⏰ Last Updated: {timestamp} (Bangkok)"
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
 # ══════════════════════════════════════════════════════════════════
 #  Interactive Control Commands
 # ══════════════════════════════════════════════════════════════════
@@ -352,7 +383,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/stop &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
@@ -368,7 +399,7 @@ async def start_job_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/start_job &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
@@ -581,6 +612,68 @@ async def apy_tracker_job(context: ContextTypes.DEFAULT_TYPE):
         apy = calculate_apy_from_cache(symbol, base_coin, spot_price, futures_price)
         if apy is not None:
             save_apy_snapshot(symbol, apy)
+
+
+async def vt_job(context: ContextTypes.DEFAULT_TYPE):
+    """Check VT drawdown."""
+    if not BotConfig.job_enabled.get("vt", True):
+        return
+
+    ath, price, drawdown, timestamp = get_vt_drawdown()
+    if ath == 0:
+        return
+
+    signal = signal_manager.check_vt_signal(drawdown)
+    if signal:
+        message = format_vt_signal(signal, ath, price)
+        await send_alert(context, message)
+
+
+async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show daily report on demand."""
+    vix_val, _ = get_vix_index()
+    thb_rate, _ = get_usd_thb_rate()
+    vt_ath, vt_price, vt_drawdown, _ = get_vt_drawdown()
+    fng_val, fng_status, _ = get_fear_and_greed_index()
+    pe_data, _ = get_world_pe_ratio()
+
+    message = format_daily_report(
+        vix_val=vix_val,
+        thb_rate=thb_rate,
+        vt_ath=vt_ath,
+        vt_price=vt_price,
+        vt_drawdown=vt_drawdown,
+        fng_val=fng_val,
+        fng_status=fng_status,
+        pe_data=pe_data
+    )
+
+    await update.message.reply_text(message, parse_mode=ParseMode.HTML)
+
+
+async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
+    """Daily market report at 7:00 AM."""
+    if not BotConfig.job_enabled.get("daily_report", True):
+        return
+
+    vix_val, _ = get_vix_index()
+    thb_rate, _ = get_usd_thb_rate()
+    vt_ath, vt_price, vt_drawdown, _ = get_vt_drawdown()
+    fng_val, fng_status, _ = get_fear_and_greed_index()
+    pe_data, _ = get_world_pe_ratio()
+
+    message = format_daily_report(
+        vix_val=vix_val,
+        thb_rate=thb_rate,
+        vt_ath=vt_ath,
+        vt_price=vt_price,
+        vt_drawdown=vt_drawdown,
+        fng_val=fng_val,
+        fng_status=fng_status,
+        pe_data=pe_data
+    )
+
+    await send_alert(context, message)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):

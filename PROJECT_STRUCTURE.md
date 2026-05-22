@@ -20,7 +20,7 @@ Business logic and market data extraction.
 | File | Purpose |
 |------|---------|
 | `arbitrage.py` | APY math and order book depth logic |
-| `indicators.py` | Macro scrapers (VIX, P/E, Fear & Greed, USD/THB) |
+| `indicators.py` | Macro scrapers (VIX, P/E, Fear & Greed, USD/THB, VT drawdown) |
 | `signals.py` | Signal state manager (cooldowns, confirmation ticks) |
 
 ### 🤖 Bot Layer (`bot/`)
@@ -51,7 +51,9 @@ Telegram interface and message handling.
 | `/vix` | Show Stock Market VIX index |
 | `/greed` | Show Crypto Fear & Greed Index |
 | `/thb` | Show real-time USD/THB rate |
-| `/status` | System health — engine, prices, job states |
+| `/vt` | Show VT ETF Drawdown and suggested action |
+| `/report` | Show Daily Market Report on demand |
+| `/status` | Show system health — engine, prices, job states |
 
 ### ⚙️ Control Commands
 | Command | Description |
@@ -71,6 +73,8 @@ Telegram interface and message handling.
 | `vix` | 60s | VIX index zone tracking |
 | `fng` | 3600s | Fear & Greed status changes |
 | `pe` | 3600s | World Valuation status changes |
+| `vt` | 3600s | VT ETF drawdown status monitoring |
+| `daily_report` | Daily (7:00 AM) | Broadcast daily compiled market report |
 | `apy_tracker`| 3600s | Saves snapshots to `arbitrage.db` |
 
 ---

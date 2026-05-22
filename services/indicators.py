@@ -16,6 +16,7 @@ _fng_cache = {"value": None, "status": None, "timestamp": None, "expires": 0}
 _thb_cache = {"value": None, "timestamp": None, "expires": 0}
 _max_pain_cache = {"data": None, "timestamp": None, "expires": 0}
 _poly_cache = {"data": None, "timestamp": None, "expires": 0}
+_vt_cache = {"ath": None, "price": None, "drawdown": None, "timestamp": None, "expires": 0}
 _CACHE_TTL = 3600  # 1 hour for indicators
 thailand_tz = zoneinfo.ZoneInfo("Asia/Bangkok")
 
@@ -452,3 +453,41 @@ def get_polymarket_crypto_events(limit: int = 10):
         logging.error(f"Error fetching Polymarket data: {e}")
         
     return [], None
+
+
+def get_vt_drawdown():
+    """
+    Fetches the Vanguard Total World Stock Index Fund ETF (VT) data.
+    Returns [ath, current_price, drawdown_percentage, timestamp]
+    """
+    global _vt_cache
+    if _vt_cache["drawdown"] is not None and time.time() < _vt_cache["expires"]:
+        return _vt_cache["ath"], _vt_cache["price"], _vt_cache["drawdown"], _vt_cache["timestamp"]
+
+    try:
+        url = 'https://query1.finance.yahoo.com/v8/finance/chart/VT?interval=1mo&range=max'
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json()
+        
+        if data and "chart" in data and data["chart"]["result"]:
+            res = data["chart"]["result"][0]
+            highs = res["indicators"]["quote"][0]["high"]
+            valid_highs = [h for h in highs if h is not None]
+            ath = max(valid_highs) if valid_highs else 0.0
+            
+            price = res["meta"].get("regularMarketPrice", 0.0)
+            
+            if ath > 0 and price > 0:
+                drawdown = ((ath - price) / ath) * 100
+                _vt_cache["ath"] = ath
+                _vt_cache["price"] = price
+                _vt_cache["drawdown"] = drawdown
+                _vt_cache["timestamp"] = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
+                _vt_cache["expires"] = time.time() + 3600  # 1 hour cache
+                return ath, price, drawdown, _vt_cache["timestamp"]
+    except Exception as e:
+        logging.error(f"Error fetching VT data: {e}")
+
+    return 0.0, 0.0, 0.0, None
+

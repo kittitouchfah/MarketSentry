@@ -42,6 +42,8 @@ class BotConfig:
         "apy_tracker": True,
         "thb": True,
         "maxpain": True,
+        "vt": True,
+        "daily_report": True,
     }
 
     # ── Settable parameters map (name → attribute) ──────────────

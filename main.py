@@ -1,8 +1,11 @@
 import os
 import logging
+import datetime
 from typing import Final
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler
+
+from bot.formatters import thailand_tz
 
 from core.engine import engine
 from bot.handlers import (
@@ -10,7 +13,8 @@ from bot.handlers import (
     pe_command, countries_command, greed_command, thb_command, maxpain_command, poly_command,
     get_command, set_command, stop_command, start_job_command, 
     status_command, arbitrage_job, rate_job, vix_job, pe_job, 
-    fng_job, thb_job, maxpain_job, apy_tracker_job, error_handler
+    fng_job, thb_job, maxpain_job, apy_tracker_job, vt_command, vt_job, 
+    report_command, daily_report_job, error_handler
 )
 
 # Load environment variables
@@ -51,6 +55,8 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('thb', thb_command))
     app.add_handler(CommandHandler('maxpain', maxpain_command))
     app.add_handler(CommandHandler('poly', poly_command))
+    app.add_handler(CommandHandler('vt', vt_command))
+    app.add_handler(CommandHandler('report', report_command))
 
     # ── Interactive Control Commands ────────────────────────────
     app.add_handler(CommandHandler('get', get_command))
@@ -68,7 +74,15 @@ if __name__ == '__main__':
     job_queue.run_repeating(fng_job, interval=3600, first=20)
     job_queue.run_repeating(thb_job, interval=60, first=25)        # 1 min for "real-time" THB
     job_queue.run_repeating(maxpain_job, interval=3600, first=30)  # Hourly Max Pain check
+    job_queue.run_repeating(vt_job, interval=3600, first=45)       # Hourly VT check
     job_queue.run_repeating(apy_tracker_job, interval=600, first=60) # 10 mins for better averages
+    
+    # 7:00 AM Daily Market Report
+    job_queue.run_daily(
+        daily_report_job,
+        time=datetime.time(hour=7, minute=0, tzinfo=thailand_tz),
+        name="daily_market_report"
+    )
 
     app.add_error_handler(error_handler)
 
