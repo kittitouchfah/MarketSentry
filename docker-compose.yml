@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  your_service_name:
+    build: .
+    # Map the host port to the container port (adjust as needed for web apps)
+    ports:
+      - "8000:8000"
+    # Optional: ensure code changes on the host are reflected in the container during development
+    volumes:
+      - .:/app

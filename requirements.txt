@@ -1,0 +1,9 @@
+python-telegram-bot
+binance-futures-connector
+python-telegram-bot[job-queue]
+python-binance
+python-dotenv
+binance-connector
+requests
+beautifulsoup4
+backports.zoneinfo; python_version < "3.9"
