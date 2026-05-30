@@ -57,6 +57,8 @@ class SignalManager:
         self._max_pain_above: Optional[bool] = None
         # Track VT drawdown status
         self._vt_status: str = "normal"
+        # Track per-country P/E status (country_name -> status_string)
+        self._country_pe_statuses: Dict[str, str] = {}
 
     def check_apy_signal(self, symbol: str, apy: float) -> Optional[Dict[str, Any]]:
         """
@@ -273,6 +275,47 @@ class SignalManager:
             "old_status": old_status,
             "new_status": new_status,
         }
+
+    def check_country_pe_signals(self, countries: list) -> list:
+        """
+        Check if any country's P/E status has changed.
+        countries: list of dicts with 'country', 'pe', 'status'.
+        Returns a list of change dicts (may be empty).
+        """
+        changes = []
+        for c in countries:
+            name = c.get("country", "")
+            new_status = c.get("status", "")
+            pe = c.get("pe", 0.0)
+            if not name or not new_status:
+                continue
+
+            old_status = self._country_pe_statuses.get(name)
+
+            # First time seeing this country — record but don't alert
+            if old_status is None:
+                self._country_pe_statuses[name] = new_status
+                continue
+
+            if old_status == new_status:
+                continue
+
+            # Check per-country cooldown
+            cooldown_key = f"country_pe:{name}"
+            if not self._cooldown_passed(cooldown_key):
+                continue
+
+            self._country_pe_statuses[name] = new_status
+            self._last_alert[cooldown_key] = time.time()
+
+            changes.append({
+                "country": name,
+                "pe": pe,
+                "old_status": old_status,
+                "new_status": new_status,
+            })
+
+        return changes
 
     def _cooldown_passed(self, key: str) -> bool:
         """Check if enough time has passed since the last alert for this key."""

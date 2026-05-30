@@ -14,7 +14,7 @@ from bot.handlers import (
     get_command, set_command, stop_command, start_job_command, 
     status_command, arbitrage_job, rate_job, vix_job, pe_job, 
     fng_job, thb_job, maxpain_job, apy_tracker_job, vt_command, vt_job, 
-    report_command, daily_report_job, error_handler
+    report_command, daily_report_job, country_pe_job, error_handler
 )
 
 # Load environment variables
@@ -75,6 +75,7 @@ if __name__ == '__main__':
     job_queue.run_repeating(thb_job, interval=60, first=25)        # 1 min for "real-time" THB
     job_queue.run_repeating(maxpain_job, interval=3600, first=30)  # Hourly Max Pain check
     job_queue.run_repeating(vt_job, interval=3600, first=45)       # Hourly VT check
+    job_queue.run_repeating(country_pe_job, interval=21600, first=120) # 6h country PE check
     job_queue.run_repeating(apy_tracker_job, interval=600, first=60) # 10 mins for better averages
     
     # 7:00 AM Daily Market Report

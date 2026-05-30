@@ -39,6 +39,7 @@ from bot.formatters import (
     format_max_pain_signal,
     format_polymarket_list,
     format_vt_signal,
+    format_country_pe_signal,
     format_daily_report,
     thailand_tz
 )
@@ -85,7 +86,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /start_job &lt;job&gt; — Resume a monitoring job\n"
         "  /status — Show system health\n\n"
         "<b>📝 Settable params:</b> apy, vix_fear, vix_super, cooldown, ticks, thb\n"
-        "<b>📝 Jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report"
+        "<b>📝 Jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -188,7 +189,7 @@ async def pe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Fairly Valued": "⚖️",
         "Overvalued": "⚠️",
         "Bubble": "💥",
-        "Expensive": "⚠️",
+        "Expensive": "🔥",
     }
     emoji = status_emoji.get(data['status'], "🌐")
     
@@ -383,7 +384,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/stop &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
@@ -399,7 +400,7 @@ async def start_job_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/start_job &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
@@ -524,13 +525,28 @@ async def pe_job(context: ContextTypes.DEFAULT_TYPE):
     if not BotConfig.job_enabled.get("pe", True):
         return
 
-    data = get_world_pe_ratio()
+    data, _ = get_world_pe_ratio()
     if not data:
         return
         
     signal = signal_manager.check_pe_signal(data['pe'], data['status'])
     if signal:
         message = format_pe_signal(signal, history=data)
+        await send_alert(context, message)
+
+
+async def country_pe_job(context: ContextTypes.DEFAULT_TYPE):
+    """Check per-country P/E status changes."""
+    if not BotConfig.job_enabled.get("country_pe", True):
+        return
+
+    countries, _ = get_all_countries_pe()
+    if not countries:
+        return
+
+    changes = signal_manager.check_country_pe_signals(countries)
+    if changes:
+        message = format_country_pe_signal(changes)
         await send_alert(context, message)
 
 
@@ -551,7 +567,7 @@ async def thb_job(context: ContextTypes.DEFAULT_TYPE):
     if not BotConfig.job_enabled.get("thb", True):
         return
 
-    rate = get_usd_thb_rate()
+    rate, timestamp = get_usd_thb_rate()
     if rate <= 0:
         return
 

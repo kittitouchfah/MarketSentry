@@ -87,7 +87,7 @@ def format_pe_signal(signal: dict, history: dict = None) -> str:
         "Fairly Valued": "⚖️",
         "Overvalued": "⚠️",
         "Bubble": "💥",
-        "Expensive": "⚠️",
+        "Expensive": "🔥",
     }
     emoji = status_emoji.get(signal['new_status'], "🌐")
     
@@ -114,6 +114,37 @@ def format_pe_signal(signal: dict, history: dict = None) -> str:
     return "\n".join(lines)
 
 
+# Shared status emoji map used across formatters
+COUNTRY_STATUS_EMOJI = {
+    "Cheap": "💎",
+    "Fair": "⚖️",
+    "Overvalued": "⚠️",
+    "Expensive": "🔥",
+    "Bubble": "💥",
+}
+
+
+def format_country_pe_signal(changes: list) -> str:
+    """Format an alert for countries whose P/E status has changed."""
+    now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
+    lines = [
+        "🌍 <b>Country P/E Status Change</b>",
+        "",
+    ]
+    for change in changes:
+        old_emoji = COUNTRY_STATUS_EMOJI.get(change['old_status'], "⚪")
+        new_emoji = COUNTRY_STATUS_EMOJI.get(change['new_status'], "⚪")
+        lines.append(
+            f"  <b>{change['country']}</b>  PE: <code>{change['pe']:.1f}</code>"
+        )
+        lines.append(
+            f"    {old_emoji} {change['old_status']} → {new_emoji} <b>{change['new_status']}</b>"
+        )
+        lines.append("")
+    lines.append(f"⏰ Last Updated: {now} (Bangkok)")
+    return "\n".join(lines)
+
+
 def format_fng_signal(signal: dict) -> str:
     """Format a Fear and Greed index alert."""
     now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
@@ -136,18 +167,24 @@ def format_fng_signal(signal: dict) -> str:
 
 
 def format_thb_signal(signal: dict) -> str:
-    """Format a USD/THB rate alert."""
+    """Format a USD/THB rate crossover alert."""
     now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
-    emoji = "📈" if signal['direction'] == "above" else "📉"
+    if signal['direction'] == "above":
+        emoji = "📈"
+        direction_text = "crossed <b>ABOVE</b> threshold (THB weakening)"
+    else:
+        emoji = "📉"
+        direction_text = "crossed <b>BELOW</b> threshold (THB strengthening)"
     return (
         f"🇹🇭 <b>USD/THB Rate Alert</b>\n"
         f"\n"
-        f"  {emoji} Rate is now <b>{signal['direction'].upper()}</b> threshold\n"
+        f"  {emoji} Rate has {direction_text}\n"
         f"  Current: <code>{signal['value']:.2f} ฿</code>\n"
         f"  Threshold: <code>{signal['threshold']:.2f} ฿</code>\n"
         f"\n"
         f"⏰ Last Updated: {now} (Bangkok)"
     )
+
 
 
 def format_max_pain_list(max_pains: dict, spot_price: float, timestamp: str = None) -> str:

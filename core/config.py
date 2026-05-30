@@ -44,6 +44,7 @@ class BotConfig:
         "maxpain": True,
         "vt": True,
         "daily_report": True,
+        "country_pe": True,
     }
 
     # ── Settable parameters map (name → attribute) ──────────────
