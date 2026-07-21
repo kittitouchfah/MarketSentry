@@ -79,17 +79,29 @@ def format_vix_signal(signal: dict) -> str:
     )
 
 
+# Shared status emoji maps used across formatters and handlers
+WORLD_PE_STATUS_EMOJI = {
+    "Undervalued": "💎",
+    "Fairly Valued": "⚖️",
+    "Overvalued": "⚠️",
+    "Expensive": "🔥",
+    "Bubble": "💥",
+}
+
+COUNTRY_STATUS_EMOJI = {
+    "Undervalued": "💎",
+    "Cheap": "🟢",
+    "Fair": "⚖️",
+    "Overvalued": "⚠️",
+    "Expensive": "🔥",
+    "Bubble": "💥",
+}
+
+
 def format_pe_signal(signal: dict, history: dict = None) -> str:
     """Format a World P/E valuation change alert."""
     now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
-    status_emoji = {
-        "Undervalued": "💎",
-        "Fairly Valued": "⚖️",
-        "Overvalued": "⚠️",
-        "Bubble": "💥",
-        "Expensive": "🔥",
-    }
-    emoji = status_emoji.get(signal['new_status'], "🌐")
+    emoji = WORLD_PE_STATUS_EMOJI.get(signal['new_status'], "🌐")
     
     lines = [
         f"🌍 <b>World Valuation Alert</b>",
@@ -116,7 +128,8 @@ def format_pe_signal(signal: dict, history: dict = None) -> str:
 
 # Shared status emoji map used across formatters
 COUNTRY_STATUS_EMOJI = {
-    "Cheap": "💎",
+    "Undervalued": "💎",
+    "Cheap": "🟢",
     "Fair": "⚖️",
     "Overvalued": "⚠️",
     "Expensive": "🔥",
@@ -289,6 +302,108 @@ def format_vt_signal(signal: dict, ath: float, price: float) -> str:
     )
 
 
+def get_live_spot_price(asset: str) -> float:
+    """
+    Fetches real-time live spot price directly from Binance REST API.
+    Supports any coin (WBETH, BTC, ETH, SOL, BNB, etc.) without relying on price_cache.
+    """
+    if not asset or asset.upper() in ("USDT", "USDC", "BUSD", "USD", "?"):
+        return None
+
+    import requests
+    asset_upper = asset.upper()
+    for quote in ("USDT", "USDC"):
+        try:
+            url = f"https://api.binance.com/api/v3/ticker/price?symbol={asset_upper}{quote}"
+            res = requests.get(url, timeout=5)
+            if res.status_code == 200:
+                price = float(res.json().get("price", 0))
+                if price > 0:
+                    return price
+        except Exception:
+            pass
+    return None
+
+
+def format_dual_settled(position: dict, current_price: float = None) -> str:
+    """Format a Dual Investment position alert with real-time live spot price."""
+    now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+    asset        = position.get("investCoin") or position.get("depositAsset") or position.get("investAsset") or "?"
+    target_price = position.get("exercisedPrice") or position.get("strikePrice") or position.get("strike") or "?"
+    apy          = position.get("apr") or position.get("annualPercentageRate") or position.get("apy") or "?"
+    settled_coin = position.get("rewardAsset") or position.get("settleCoin") or position.get("rewardCoin") or "?"
+    amount       = (
+        position.get("amount") or
+        position.get("investAmount") or
+        position.get("depositAmount") or
+        position.get("subscriptionAmount") or
+        position.get("purchaseAmount") or
+        "?"
+    )
+    pos_id       = position.get("id") or position.get("orderId") or "?"
+
+    # Determine target coin for real-time live price check via REST API
+    if current_price is None:
+        target_coin = asset
+        if target_coin in ("USDT", "USDC", "BUSD", "?") or not target_coin:
+            target_coin = position.get("exercisedCoin") or position.get("settleAsset") or position.get("rewardAsset") or ""
+        
+        current_price = get_live_spot_price(target_coin)
+
+    # Determine if exercised (converted to other coin) or redeemed (kept original)
+    was_exercised = position.get("exercised")
+    if was_exercised is None:
+        if settled_coin != "?" and asset != "?":
+            was_exercised = (settled_coin.upper() != asset.upper())
+        else:
+            was_exercised = False
+
+    if was_exercised:
+        outcome_emoji = "🔄"
+        outcome_text  = f"Converted to <b>{settled_coin}</b>"
+    else:
+        outcome_emoji = "✅"
+        outcome_text  = f"Redeemed in <b>{asset}</b>"
+
+    try:
+        apy_val = float(apy)
+        apy_str = f"{apy_val * 100:.2f}%" if apy_val < 1 else f"{apy_val:.2f}%"
+    except (TypeError, ValueError):
+        apy_str = str(apy)
+
+    try:
+        target_str = f"${float(target_price):,.2f}"
+    except (TypeError, ValueError):
+        target_str = str(target_price)
+
+    try:
+        amt_float = float(amount)
+        amount_str = f"{amt_float:,.4f}".rstrip('0').rstrip('.') if '.' in f"{amt_float:,.4f}" else f"{amt_float:,.0f}"
+    except (TypeError, ValueError):
+        amount_str = str(amount)
+
+    price_line = ""
+    if current_price:
+        try:
+            price_line = f"  📊 Live Price:   <b>${float(current_price):,.2f}</b>\n"
+        except (TypeError, ValueError):
+            price_line = f"  📊 Live Price:   <b>{current_price}</b>\n"
+
+    return (
+        f"💰 <b>Dual Investment Position</b>\n"
+        f"\n"
+        f"  {outcome_emoji} Outcome: {outcome_text}\n"
+        f"  🪙 Asset: <code>{asset}</code>  Amount: <code>{amount_str}</code>\n"
+        f"  🎯 Target Price: <b>{target_str}</b>\n"
+        f"{price_line}"
+        f"  📈 APY Earned: <b>{apy_str}</b>\n"
+        f"  🆔 Position: <code>{pos_id}</code>\n"
+        f"\n"
+        f"⏰ Updated at: {now} (Bangkok)"
+    )
+
+
 def format_daily_report(
     vix_val: float,
     thb_rate: float,
@@ -339,14 +454,7 @@ def format_daily_report(
         pe_val_str = f"{pe_data.get('pe', 0.0):.2f}"
         pe_status = pe_data.get('status', 'Unknown')
         pe_status_str = pe_status
-        status_emoji = {
-            "Undervalued": "💎",
-            "Fairly Valued": "⚖️",
-            "Overvalued": "⚠️",
-            "Bubble": "💥",
-            "Expensive": "⚠️",
-        }
-        pe_emoji = status_emoji.get(pe_status, "🌐")
+        pe_emoji = WORLD_PE_STATUS_EMOJI.get(pe_status, "🌐")
 
     lines = [
         "🌅 <b>Daily Market Report (7:00 AM)</b>",

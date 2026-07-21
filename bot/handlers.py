@@ -28,6 +28,8 @@ from services.indicators import (
     get_vt_drawdown
 )
 from services.signals import signal_manager
+from services.earn import get_dual_investment_positions
+from core.database import is_dual_alerted, mark_dual_alerted
 from bot.formatters import (
     format_apy_signal,
     format_funding_signal,
@@ -41,6 +43,9 @@ from bot.formatters import (
     format_vt_signal,
     format_country_pe_signal,
     format_daily_report,
+    format_dual_settled,
+    WORLD_PE_STATUS_EMOJI,
+    COUNTRY_STATUS_EMOJI,
     thailand_tz
 )
 
@@ -65,28 +70,30 @@ async def send_alert(context: ContextTypes.DEFAULT_TYPE, message: str):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message with available commands."""
     text = (
-        "🤖 <b>MarketSentry Active</b>\n\n"
-        "<b>📋 Commands:</b>\n"
-        "  /apy — Show current APY for all coins\n"
-        "  /rate — Show BTC funding rate\n"
-        "  /vix — Show VIX index\n"
-        "  /pe — Show World P/E Ratio & History\n"
-        "  /countries — Show P/E for all countries\n"
-        "  /greed — Show Crypto Fear & Greed Index\n"
+        "🤖 <b>MarketSentry Active Sentinel</b>\n\n"
+        "<b>📊 Market & Arbitrage:</b>\n"
+        "  /apy — Show current spot-futures APY spreads\n"
+        "  /rate — Show BTC funding rate status\n"
+        "  /maxpain — Show BTC Options Max Pain targets\n"
+        "  /earn — Show active Dual Investment contracts (alerts auto-fire on settlement)\n\n"
+        "<b>🌍 Macro & Sentiment:</b>\n"
+        "  /vix — Show Stock Market VIX index\n"
+        "  /pe — Show World P/E Ratio & trends\n"
+        "  /countries — Show P/E rankings for 40+ countries\n"
+        "  /greed — Show Crypto Fear & Greed index\n"
         "  /thb — Show real-time USD/THB exchange rate\n"
-        "  /maxpain — Show BTC Options Max Pain\n"
-        "  /poly [num] — Show Polymarket Crypto Predictions\n"
-        "  /vt — Show VT ETF Drawdown\n"
-        "  /report — Show Daily Market Report\n"
-        "  /h — Show this help message\n\n"
-        "<b>⚙️ Controls:</b>\n"
-        "  /get — Show all current settings\n"
-        "  /set &lt;param&gt; &lt;value&gt; — Change a setting\n"
-        "  /stop &lt;job&gt; — Pause a monitoring job\n"
-        "  /start_job &lt;job&gt; — Resume a monitoring job\n"
-        "  /status — Show system health\n\n"
-        "<b>📝 Settable params:</b> apy, vix_fear, vix_super, cooldown, ticks, thb\n"
-        "<b>📝 Jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe"
+        "  /poly [limit] — Show Polymarket crypto prediction odds\n"
+        "  /vt — Show VT ETF Drawdown & DCA action\n"
+        "  /report — Show Daily Market Report on demand\n\n"
+        "<b>⚙️ Bot Control & Health:</b>\n"
+        "  /status — System health, price latency & job status\n"
+        "  /get — View all runtime parameters & settings\n"
+        "  /set &lt;param&gt; &lt;value&gt; — Adjust threshold at runtime\n"
+        "  /stop &lt;job&gt; — Pause a background monitoring job\n"
+        "  /start_job &lt;job&gt; — Resume a background job\n"
+        "  /h — Show this help menu\n\n"
+        "<b>📝 Settable Params:</b> <code>apy</code>, <code>vix_fear</code>, <code>vix_super</code>, <code>cooldown</code>, <code>ticks</code>, <code>thb</code>\n"
+        "<b>📝 Background Jobs:</b> <code>arbitrage</code>, <code>rate</code>, <code>vix</code>, <code>pe</code>, <code>fng</code>, <code>apy_tracker</code>, <code>thb</code>, <code>maxpain</code>, <code>vt</code>, <code>daily_report</code>, <code>country_pe</code>, <code>earn</code>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -184,14 +191,7 @@ async def pe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📭 No P/E data available.")
         return
 
-    status_emoji = {
-        "Undervalued": "💎",
-        "Fairly Valued": "⚖️",
-        "Overvalued": "⚠️",
-        "Bubble": "💥",
-        "Expensive": "🔥",
-    }
-    emoji = status_emoji.get(data['status'], "🌐")
+    emoji = WORLD_PE_STATUS_EMOJI.get(data['status'], "🌐")
     
     text = (
         f"🌍 <b>World Market Valuation</b>\n\n"
@@ -220,18 +220,10 @@ async def countries_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     countries.sort(key=lambda x: x['pe'], reverse=True)
 
-    status_icons = {
-        "Cheap": "💎",
-        "Fair": "⚖️",
-        "Overvalued": "⚠️",
-        "Expensive": "🔥",
-        "Bubble": "💥",
-    }
-
     lines = ["🌍 <b>Global P/E Rankings</b>\n"]
     for c in countries:
         icon = "⚪"
-        for key, sym in status_icons.items():
+        for key, sym in COUNTRY_STATUS_EMOJI.items():
             if key in c['status']:
                 icon = sym
                 break
@@ -348,6 +340,22 @@ async def vt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 
+async def earn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show active Dual Investment positions and contract amounts."""
+    active = get_dual_investment_positions(status='PURCHASE_SUCCESS', limit=50)
+    
+    if not active:
+        await update.message.reply_text("📭 No active Dual Investment contracts found.")
+        return
+
+    lines = ["💰 <b>Active Dual Investment Contracts</b>\n"]
+    for pos in active:
+        lines.append(format_dual_settled(pos))
+        lines.append("")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
 # ══════════════════════════════════════════════════════════════════
 #  Interactive Control Commands
 # ══════════════════════════════════════════════════════════════════
@@ -384,7 +392,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/stop &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe, earn"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
@@ -400,7 +408,7 @@ async def start_job_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/start_job &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe, earn"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
@@ -484,6 +492,9 @@ async def arbitrage_job(context: ContextTypes.DEFAULT_TYPE):
         apy = calculate_apy_from_cache(symbol, base_coin, spot_price, futures_price)
         if apy is None:
             continue
+            
+        if abs(futures_price - spot_price) < 5.0:
+            continue
 
         signal = signal_manager.check_apy_signal(symbol, apy)
         if signal:
@@ -555,7 +566,7 @@ async def fng_job(context: ContextTypes.DEFAULT_TYPE):
     if not BotConfig.job_enabled.get("fng", True):
         return
 
-    val, status = get_fear_and_greed_index()
+    val, status, _ = get_fear_and_greed_index()
     signal = signal_manager.check_fng_signal(val, status)
     if signal:
         message = format_fng_signal(signal)
@@ -643,6 +654,35 @@ async def vt_job(context: ContextTypes.DEFAULT_TYPE):
     if signal:
         message = format_vt_signal(signal, ath, price)
         await send_alert(context, message)
+
+
+async def earn_job(context: ContextTypes.DEFAULT_TYPE):
+    """Check for settled Dual Investment positions."""
+    if not BotConfig.job_enabled.get("earn", True):
+        return
+
+    positions = get_dual_investment_positions(status='SETTLED', limit=100)
+    for pos in positions:
+        pos_id = str(pos.get('id'))
+        
+        # If already alerted, skip
+        if is_dual_alerted(pos_id):
+            continue
+            
+        settle_ms = pos.get('settleDate', 0)
+        import time
+        now_ms = time.time() * 1000
+        
+        # If the position settled more than 24 hours ago, mark it silently to avoid spam
+        # 24 hours = 86400000 ms
+        if (now_ms - settle_ms) > 86400000:
+            mark_dual_alerted(pos_id)
+            continue
+            
+        # It's a recently settled position, send an alert!
+        message = "🔔 <b>Dual Investment Settled!</b>\n\n" + format_dual_settled(pos)
+        await send_alert(context, message)
+        mark_dual_alerted(pos_id)
 
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):

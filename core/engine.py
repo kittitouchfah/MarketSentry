@@ -1,10 +1,13 @@
 """
-High-speed real-time price engine.
+Real-time price engine.
 
-Uses TWO parallel background threads to maximize update frequency:
-  - Thread 1 (FAST): Mark prices + funding rates every 100ms  → 600 req/min
-  - Thread 2 (SLOW): Spot prices every 1s                     → 60  req/min
-  Total: ~660 req/min out of 6,000 allowed (11% of rate limit)
+Uses TWO parallel background threads to fetch prices via REST polling:
+  - Thread 1: Mark prices + funding rates every 2s  →  30 req/min
+  - Thread 2: Spot prices every 5s                  →  12 req/min
+  Total: ~42 req/min out of 2,400 IP limit (≈2% usage)
+
+Binance CM Futures mark price endpoint returns ALL symbols in one call,
+so one request per interval covers the full symbol list.
 """
 
 import os
@@ -110,16 +113,18 @@ SUPPORTED_COINS = {
 }
 
 # ── Polling intervals ──────────────────────────────────────────────
-MARK_POLL_INTERVAL = 0.1   # seconds (600 mark updates/min)
-SPOT_POLL_INTERVAL = 1.0   # seconds (60 spot updates/min)
+# Binance IP limit is 2,400 req/min. One bulk call covers all symbols.
+# 2s mark + 5s spot = ~42 req/min total (≈2% of budget).
+MARK_POLL_INTERVAL = 2.0   # seconds (30 mark updates/min)
+SPOT_POLL_INTERVAL = 5.0   # seconds (12 spot updates/min)
 
 
 class PriceEngine:
     """
-    High-speed dual-thread price engine.
+    Dual-thread price engine.
 
-    Thread 1 — Mark prices + funding rates (every 100ms)
-    Thread 2 — Spot prices (every 1s, slower since spot is more stable)
+    Thread 1 — Mark prices + funding rates (every 2s)
+    Thread 2 — Spot prices (every 5s)
     """
 
     def __init__(self):
@@ -142,21 +147,21 @@ class PriceEngine:
 
         self._running = True
 
-        # Thread 1: fast mark price loop (100ms)
+        # Thread 1: mark price loop
         self._mark_thread = threading.Thread(
             target=self._mark_loop, daemon=True, name="MarkPriceThread"
         )
         self._mark_thread.start()
 
-        # Thread 2: spot price loop (1s)
+        # Thread 2: spot price loop
         self._spot_thread = threading.Thread(
             target=self._spot_loop, daemon=True, name="SpotPriceThread"
         )
         self._spot_thread.start()
 
         logger.info(
-            f"PriceEngine started — mark@{MARK_POLL_INTERVAL*1000:.0f}ms, "
-            f"spot@{SPOT_POLL_INTERVAL*1000:.0f}ms"
+            f"PriceEngine started — mark@{MARK_POLL_INTERVAL:.0f}s, "
+            f"spot@{SPOT_POLL_INTERVAL:.0f}s"
         )
 
     def stop(self):
@@ -179,23 +184,33 @@ class PriceEngine:
         spot_rpm = int(60 / SPOT_POLL_INTERVAL)
         total = mark_rpm + spot_rpm
         return (
-            f"Mark: {MARK_POLL_INTERVAL*1000:.0f}ms ({mark_rpm}/min) | "
-            f"Spot: {SPOT_POLL_INTERVAL*1000:.0f}ms ({spot_rpm}/min) | "
-            f"Total: {total}/min of 6,000 budget"
+            f"Mark: {MARK_POLL_INTERVAL:.0f}s ({mark_rpm}/min) | "
+            f"Spot: {SPOT_POLL_INTERVAL:.0f}s ({spot_rpm}/min) | "
+            f"Total: {total}/min of 2,400 IP budget"
         )
 
     # ── Thread 1: Fast mark price loop ──────────────────────────
 
     def _mark_loop(self):
-        """Poll mark prices + funding every 100ms."""
+        """Poll mark prices + funding every MARK_POLL_INTERVAL seconds."""
+        backoff = MARK_POLL_INTERVAL
         while self._running:
             try:
                 self._update_mark_prices()
                 self._mark_connected = True
+                backoff = MARK_POLL_INTERVAL  # reset on success
             except Exception as e:
-                logger.error(f"Mark price loop error: {e}")
                 self._mark_connected = False
-                time.sleep(2)
+                # Rate-limit error: back off aggressively to let the window reset
+                if "-1003" in str(e):
+                    backoff = min(backoff * 2, 60)  # cap at 60s
+                    logger.warning(
+                        f"Mark price rate-limited — backing off {backoff:.0f}s. ({e})"
+                    )
+                else:
+                    backoff = MARK_POLL_INTERVAL
+                    logger.error(f"Mark price loop error: {e}")
+                time.sleep(backoff)
                 continue
             time.sleep(MARK_POLL_INTERVAL)
 
@@ -219,15 +234,24 @@ class PriceEngine:
     # ── Thread 2: Spot price loop ────────────────────────────────
 
     def _spot_loop(self):
-        """Poll spot prices every 1s (spot prices move slower)."""
+        """Poll spot prices every SPOT_POLL_INTERVAL seconds."""
+        backoff = SPOT_POLL_INTERVAL
         while self._running:
             try:
                 self._update_spot_prices()
                 self._spot_connected = True
+                backoff = SPOT_POLL_INTERVAL  # reset on success
             except Exception as e:
-                logger.error(f"Spot price loop error: {e}")
                 self._spot_connected = False
-                time.sleep(2)
+                if "-1003" in str(e):
+                    backoff = min(backoff * 2, 60)
+                    logger.warning(
+                        f"Spot price rate-limited — backing off {backoff:.0f}s. ({e})"
+                    )
+                else:
+                    backoff = SPOT_POLL_INTERVAL
+                    logger.error(f"Spot price loop error: {e}")
+                time.sleep(backoff)
                 continue
             time.sleep(SPOT_POLL_INTERVAL)
 

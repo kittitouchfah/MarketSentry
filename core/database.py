@@ -50,6 +50,14 @@ def init_db():
         )
     ''')
     
+    # Table for Dual Investment Alerts
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS dual_investment_alerts (
+            position_id TEXT PRIMARY KEY,
+            timestamp INTEGER NOT NULL
+        )
+    ''')
+    
     conn.commit()
     conn.close()
 
@@ -166,5 +174,23 @@ def cleanup_old_data():
     conn.commit()
     conn.close()
 
+def mark_dual_alerted(position_id: str):
+    """Marks a Dual Investment position as alerted."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('INSERT OR IGNORE INTO dual_investment_alerts (position_id, timestamp) VALUES (?, ?)', (position_id, int(time.time())))
+    conn.commit()
+    conn.close()
+
+def is_dual_alerted(position_id: str) -> bool:
+    """Checks if a Dual Investment position has already been alerted."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM dual_investment_alerts WHERE position_id = ?', (position_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row is not None
+
 # Initialize DB on module load
 init_db()
+

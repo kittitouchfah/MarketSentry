@@ -45,6 +45,7 @@ class BotConfig:
         "vt": True,
         "daily_report": True,
         "country_pe": True,
+        "earn": True,
     }
 
     # ── Settable parameters map (name → attribute) ──────────────
