@@ -390,6 +390,21 @@ def format_dual_settled(position: dict, current_price: float = None) -> str:
         except (TypeError, ValueError):
             price_line = f"  📊 Live Price:   <b>{current_price}</b>\n"
 
+    settle_ms = position.get("settleDate") or position.get("deliveryDate") or position.get("settlementDate") or 0
+    settle_line = ""
+    if settle_ms:
+        try:
+            settle_dt = datetime.fromtimestamp(float(settle_ms) / 1000, tz=thailand_tz)
+            now_dt = datetime.now(thailand_tz)
+            diff_seconds = (settle_dt - now_dt).total_seconds()
+            if diff_seconds > 0:
+                days_left = max(0, int(round(diff_seconds / 86400)))
+                settle_line = f"  📅 Settle Date:  <b>{settle_dt.strftime('%Y-%m-%d %H:%M')} ({days_left} days left)</b>\n"
+            else:
+                settle_line = f"  📅 Settle Date:  <b>{settle_dt.strftime('%Y-%m-%d %H:%M')} (Settled)</b>\n"
+        except Exception:
+            pass
+
     return (
         f"💰 <b>Dual Investment Position</b>\n"
         f"\n"
@@ -397,11 +412,11 @@ def format_dual_settled(position: dict, current_price: float = None) -> str:
         f"  🪙 Asset: <code>{asset}</code>  Amount: <code>{amount_str}</code>\n"
         f"  🎯 Target Price: <b>{target_str}</b>\n"
         f"{price_line}"
+        f"{settle_line}"
         f"  📈 APY Earned: <b>{apy_str}</b>\n"
-        f"  🆔 Position: <code>{pos_id}</code>\n"
-        f"\n"
-        f"⏰ Updated at: {now} (Bangkok)"
+        f"  🆔 Position: <code>{pos_id}</code>"
     )
+
 
 
 def format_daily_report(
@@ -468,5 +483,83 @@ def format_daily_report(
         f"⏰ Generated: {now} (Bangkok)"
     ]
     return "\n".join(lines)
+
+
+def format_dual_targets_list(targets: list) -> str:
+    """Format active Dual Investment watch targets in a clean note style."""
+    if not targets:
+        return (
+            "📝 <b>Dual Investment Watch Notes</b>\n\n"
+            "📭 <i>No active watch targets set.</i>\n\n"
+            "💡 <b>Add targets via note format:</b>\n"
+            "<code>/dual add</code>\n"
+            "<code>btc 60000 10 buylow</code>\n"
+            "<code>eth 1700 15 buylow</code>\n"
+            "<code>eth 2500 3 sellhigh</code>\n"
+            "<code>sol 180 20 sellhigh</code>\n\n"
+            "🪙 <b>Example symbols:</b> <code>BTC</code>, <code>ETH</code>, <code>BNB</code>, <code>SOL</code>, <code>XRP</code>, <code>DOGE</code>, <code>ADA</code>, <code>AVAX</code>, <code>LINK</code>, <code>NEAR</code>, <code>SUI</code>"
+        )
+
+    lines = ["📝 <b>Dual Investment Watch Notes</b>\n"]
+    for t in targets:
+        opt_type = t['option_type'].lower()
+        badge = "🟢 Buy Low" if "buy" in opt_type or "put" in opt_type else "🔴 Sell High"
+        lines.append(
+            f"  📌 <code>#{t['id']}</code> | <b>{t['coin']}</b> ${t['strike_price']:,.2f} | "
+            f"APR ≥ <b>{t['min_apr']}%</b> | {badge}"
+        )
+
+    lines.extend([
+        "",
+        "🪙 <i>Example symbols: <code>BTC</code>, <code>ETH</code>, <code>BNB</code>, <code>SOL</code>, <code>XRP</code>, <code>DOGE</code>, <code>SUI</code></i>",
+        "🔎 <i>To scan now: <code>/dual scan</code></i>",
+        "💡 <i>To add: <code>/dual add &lt;coin&gt; &lt;strike&gt; &lt;min_apr&gt; &lt;buylow|sellhigh&gt;</code></i>",
+        "💡 <i>To delete: <code>/dual del &lt;id&gt;</code></i>",
+        "💡 <i>To clear all: <code>/dual clear</code></i>"
+    ])
+    return "\n".join(lines)
+
+
+
+def format_dual_scan_alert(target: dict, product: dict, apr: float, strike: float) -> str:
+    """Format alert message when a Dual Investment target condition is matched."""
+    now = datetime.now(thailand_tz).strftime("%Y-%m-%d %H:%M:%S")
+
+    coin = target['coin'].upper()
+    opt_raw = target['option_type'].lower()
+    if "buy" in opt_raw or "put" in opt_raw:
+        type_str = "Buy Low (PUT)"
+        type_emoji = "🟢"
+    else:
+        type_str = "Sell High (CALL)"
+        type_emoji = "🔴"
+
+    settle_ms = product.get("settleDate") or product.get("deliveryDate") or 0
+    settle_str = "N/A"
+    if settle_ms:
+        try:
+            settle_dt = datetime.fromtimestamp(settle_ms / 1000, tz=thailand_tz)
+            now_dt = datetime.now(thailand_tz)
+            diff_seconds = (settle_dt - now_dt).total_seconds()
+            days_left = max(0, int(round(diff_seconds / 86400)))
+            settle_str = f"{settle_dt.strftime('%Y-%m-%d %H:%M')} ({days_left} days)"
+        except Exception:
+            pass
+
+    prod_id = product.get("id") or product.get("orderId") or "N/A"
+
+    return (
+        f"🎯 <b>Dual Investment Target Matched!</b>\n\n"
+        f"  {type_emoji} <b>Type:</b> {type_str}\n"
+        f"  🪙 <b>Coin:</b> <code>{coin}</code>\n"
+        f"  🎯 <b>Target Strike:</b> <b>${strike:,.2f}</b>\n"
+        f"  📈 <b>Current APR:</b> <b>{apr:.2f}%</b> (Target: ≥ {target['min_apr']:.1f}%)\n"
+        f"  📅 <b>Settle Date:</b> {settle_str}\n"
+        f"  🆔 <b>Product ID:</b> <code>{prod_id}</code>\n\n"
+        f"⏰ Alert Time: {now} (Bangkok)"
+    )
+
+
+
 
 

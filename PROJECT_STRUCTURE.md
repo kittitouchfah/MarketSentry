@@ -13,7 +13,7 @@ Internal systems and engine components.
 |------|---------|
 | `config.py` | Runtime-mutable configuration (thresholds, job toggles) |
 | `engine.py` | High-speed real-time price engine (Dual-thread polling) |
-| `database.py` | SQLite history management for APY, THB, Max Pain & Dual Investment alert tracking |
+| `database.py` | SQLite history management for APY, THB, Max Pain, Dual Investment targets & alert tracking |
 
 ### 🧠 Services (`services/`)
 Business logic and market data extraction.
@@ -22,7 +22,7 @@ Business logic and market data extraction.
 | `arbitrage.py` | APY math and order book depth logic |
 | `indicators.py` | Macro scrapers (VIX, P/E, Fear & Greed, USD/THB, VT drawdown, Max Pain, Polymarket) |
 | `signals.py` | Signal state manager (cooldowns, confirmation ticks) |
-| `earn.py` | Binance Dual Investment position fetcher (signed REST API) |
+| `earn.py` | Binance Dual Investment positions & product market scanner (signed REST API) |
 
 ### 🤖 Bot Layer (`bot/`)
 Telegram interface and message handling.
@@ -50,7 +50,8 @@ Telegram interface and message handling.
 | `/apy` | Show current spot-futures APY spreads + 1h/4h momentum |
 | `/rate` | Show BTC funding rate status |
 | `/maxpain` | Show BTC Options Max Pain targets for all expirations |
-| `/earn` | Show all active Dual Investment contracts with live prices |
+| `/earn` | Show all active Dual Investment contracts with live prices & days remaining |
+| `/dual` | Manage Dual Investment target watch notes (`add`, `del`, `list`, `scan`, `clear`) |
 
 ### 🌍 Macro & Sentiment
 | Command | Description |
@@ -70,8 +71,8 @@ Telegram interface and message handling.
 | `/status` | System health — engine, prices, job states |
 | `/get` | Show all current thresholds and settings |
 | `/set <param> <val>` | Change a threshold at runtime (e.g., `/set apy 10`) |
-| `/stop <job>` | Pause a monitoring job (e.g., `/stop vix`) |
-| `/start_job <job>` | Resume a job (e.g., `/start_job vix`) |
+| `/stop <job>` | Pause a monitoring job (e.g., `/stop dual_scan`) |
+| `/start_job <job>` | Resume a job (e.g., `/start_job dual_scan`) |
 | `/h` | Show this help menu |
 
 ---
@@ -89,6 +90,7 @@ Telegram interface and message handling.
 | `vt` | 3600s | VT ETF drawdown status monitoring |
 | `maxpain` | 3600s | BTC Options Max Pain crossover alerts |
 | `earn` | 600s | Dual Investment settlement detection & alerts |
+| `dual_scan` | 300s | Dual Investment target scanner & alerts |
 | `apy_tracker` | 600s | Saves APY snapshots to `arbitrage.db` |
 | `daily_report` | Daily (7:00 AM BKK) | Broadcast compiled daily market report |
 

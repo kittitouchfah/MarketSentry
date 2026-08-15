@@ -34,7 +34,7 @@ class BotConfig:
 
     # ── Job enabled flags (toggled by /start and /stop) ─────────
     job_enabled: Dict[str, bool] = {
-        "arbitrage": True,
+        "arbitrage": False,  # Off by default — enable with /arb on
         "rate": True,
         "vix": True,
         "pe": True,
@@ -46,6 +46,7 @@ class BotConfig:
         "daily_report": True,
         "country_pe": True,
         "earn": True,
+        "dual_scan": True,
     }
 
     # ── Settable parameters map (name → attribute) ──────────────

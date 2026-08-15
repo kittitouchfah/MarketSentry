@@ -10,14 +10,14 @@ MarketSentry acts as a 24/7 sentinel—monitoring micro-level exchange price dif
 
 *   **⚡ Dual-Threaded Price Engine**: Runs dedicated polling threads for mark prices (2s) and spot prices (5s), utilizing a smart cache to avoid Binance API rate limits (~42 req/min of 2,400 limit).
 *   **📊 Spread & Funding Rate Monitor**: Calculates real-time spot-futures APY spreads and tracks funding rate trends with 3-tick confirmation to eliminate false alerts.
-*   **💰 Dual Investment Tracker**: Monitors Binance Dual Investment contracts — auto-alerts on settlement within 24h, shows all active contracts with live spot prices (including WBETH and other wrapped tokens).
+*   **💰 Dual Investment Tracker & Scanner**: Monitors Binance Dual Investment contracts — auto-alerts on settlement within 24h, shows all active contracts with live spot prices and days remaining (`/earn`). Includes a real-time target scanner (`/dual`) with note-style configuration (`btc 60000 10 buylow`) that scans the market and alerts when matching strike price and APR contracts are available.
 *   **🌍 Macro Market Sentiment**: Scrapes and tracks the Stock Market Volatility Index (VIX), World P/E Ratios (global + 40+ countries), and the Crypto Fear & Greed Index.
 *   **🧠 Prediction & Options Metrics**: Integrates Polymarket crypto prediction market outcomes and monitors BTC Option Max Pain price targets.
 *   **🌎 VT ETF Drawdown Sentinel**: Tracks Vanguard Total World Stock ETF (VT) drawdown from its all-time high and provides tier-based DCA investment advice.
 *   **🇹🇭 USD/THB Monitor**: Real-time USD/THB exchange rate tracking with threshold crossover alerts.
 *   **🌅 Scheduled Market Reports**: Delivers a daily compiled report of VIX, USD/THB, VT, Fear & Greed, and World P/E directly to your chat at 7:00 AM Bangkok time.
 *   **⚙️ Runtime-Mutable Controls**: Control jobs (start/stop) and adjust alert thresholds directly from Telegram without restarting the engine.
-*   **💾 Database Integration**: Persists historical APY, USD/THB, Option Max Pain snapshots, and Dual Investment alert state to an SQLite database for trend analysis and deduplication.
+*   **💾 Database Integration**: Persists historical APY, USD/THB, Option Max Pain snapshots, Dual Investment watch notes, and alert state to an SQLite database for trend analysis and deduplication.
 
 ---
 
@@ -26,12 +26,12 @@ MarketSentry acts as a 24/7 sentinel—monitoring micro-level exchange price dif
 *   📁 **`core/`**: Core engine components.
     *   `engine.py` — High-speed dual-threaded Binance polling engine with `PriceCache`.
     *   `config.py` — Thread-safe, runtime-mutable configurations and job toggles.
-    *   `database.py` — SQLite database interactions for APY, THB, Max Pain & Dual Investment alert tracking.
+    *   `database.py` — SQLite database interactions for APY, THB, Max Pain, Dual Investment watch targets & alert tracking.
 *   📁 **`services/`**: Scrapers and analytical layers.
     *   `arbitrage.py` — Mathematical models for APY spread calculations and order book depth.
     *   `indicators.py` — Multi-source scrapers (VIX, P/E, Fear & Greed, USD/THB, Polymarket, Max Pain, VT ETF).
     *   `signals.py` — Alert state management and cooldown mechanisms with tick confirmation.
-    *   `earn.py` — Binance Dual Investment position fetcher via signed REST API.
+    *   `earn.py` — Binance Dual Investment positions and product market scanner via signed REST API.
 *   📁 **`bot/`**: Telegram interface layer.
     *   `handlers.py` — User command controllers and background job handlers.
     *   `formatters.py` — Beautiful HTML message templates with centralized `WORLD_PE_STATUS_EMOJI` and `COUNTRY_STATUS_EMOJI` maps, and `get_live_spot_price()` helper.
@@ -86,7 +86,11 @@ docker-compose up -d --build
 *   `/apy` — View current spot-futures APY spreads and averages (1h/4h).
 *   `/rate` — Check BTC funding rate.
 *   `/maxpain` — View BTC Option Max Pain price targets for all expirations.
-*   `/earn` — Show all active Dual Investment contracts with live spot prices. Auto-alerts fire on settlement.
+*   `/earn` — Show all active Dual Investment contracts with live spot prices and days remaining.
+*   `/dual` — Manage Dual Investment watch targets in note style (`add`, `del`, `list`, `scan`, `clear`).
+*   `/dual add <notes>` — Add watch target note(s) (e.g. `btc 60000 10 buylow`).
+*   `/dual del <id>` — Delete a watch note by ID.
+*   `/dual scan` — Instantly scan Binance market on-demand for active watch targets.
 
 ### 🌍 Macro & Sentiment
 *   `/vix` — Check global Stock Volatility (VIX).
@@ -102,8 +106,8 @@ docker-compose up -d --build
 *   `/status` — View system health, live prices, poll rates, and engine status.
 *   `/get` — Retrieve all current system thresholds and running jobs.
 *   `/set <param> <value>` — Change thresholds at runtime (e.g., `/set apy 10`).
-*   `/stop <job>` — Pause a specific background job (e.g., `/stop vix`).
-*   `/start_job <job>` — Resume a background job (e.g., `/start_job vix`).
+*   `/stop <job>` — Pause a specific background job (e.g., `/stop dual_scan`).
+*   `/start_job <job>` — Resume a background job (e.g., `/start_job dual_scan`).
 *   `/h` — Show help menu.
 
 **Settable params:** `apy`, `vix_fear`, `vix_super`, `cooldown`, `ticks`, `thb`
@@ -118,6 +122,7 @@ docker-compose up -d --build
 | `vix` | 60s | VIX index zone tracking |
 | `thb` | 60s | USD/THB crossover alerts |
 | `earn` | 600s | Dual Investment settlement detection |
+| `dual_scan` | 300s | Dual Investment target scanner & alerts |
 | `apy_tracker` | 600s | Saves APY snapshots to `arbitrage.db` |
 | `fng` | 3600s | Fear & Greed status changes |
 | `pe` | 3600s | World Valuation status changes |

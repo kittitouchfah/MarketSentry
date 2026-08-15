@@ -11,10 +11,11 @@ from core.engine import engine
 from bot.handlers import (
     start_command, apy_command, rate_command, vix_command, 
     pe_command, countries_command, greed_command, thb_command, maxpain_command, poly_command,
-    get_command, set_command, stop_command, start_job_command, 
+    get_command, set_command, stop_command, start_job_command, arb_command,
     status_command, arbitrage_job, rate_job, vix_job, pe_job, 
     fng_job, thb_job, maxpain_job, apy_tracker_job, vt_command, vt_job, earn_command,
-    report_command, daily_report_job, country_pe_job, earn_job, error_handler
+    report_command, daily_report_job, country_pe_job, earn_job, error_handler,
+    dual_command, dual_add_command, dual_del_command, dual_scan_job
 )
 
 # Load environment variables
@@ -57,6 +58,9 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('poly', poly_command))
     app.add_handler(CommandHandler('vt', vt_command))
     app.add_handler(CommandHandler('earn', earn_command))
+    app.add_handler(CommandHandler('dual', dual_command))
+    app.add_handler(CommandHandler('dual_add', dual_add_command))
+    app.add_handler(CommandHandler('dual_del', dual_del_command))
     app.add_handler(CommandHandler('report', report_command))
 
     # ── Interactive Control Commands ────────────────────────────
@@ -65,6 +69,7 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('stop', stop_command))
     app.add_handler(CommandHandler('start_job', start_job_command))
     app.add_handler(CommandHandler('status', status_command))
+    app.add_handler(CommandHandler('arb', arb_command))
 
     # ── Background Jobs ─────────────────────────────────────────
     job_queue = app.job_queue
@@ -76,6 +81,7 @@ if __name__ == '__main__':
     job_queue.run_repeating(thb_job, interval=60, first=25)        # 1 min for "real-time" THB
     job_queue.run_repeating(maxpain_job, interval=3600, first=30)  # Hourly Max Pain check
     job_queue.run_repeating(earn_job, interval=600, first=40)      # 10 min Dual Investment check
+    job_queue.run_repeating(dual_scan_job, interval=300, first=50) # 5 min Dual Investment target scanner
     job_queue.run_repeating(vt_job, interval=3600, first=45)       # Hourly VT check
     job_queue.run_repeating(country_pe_job, interval=3600, first=120) # 1h country PE check
     job_queue.run_repeating(apy_tracker_job, interval=600, first=60) # 10 mins for better averages

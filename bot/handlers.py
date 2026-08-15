@@ -1,7 +1,7 @@
 import logging
 import os
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -28,8 +28,17 @@ from services.indicators import (
     get_vt_drawdown
 )
 from services.signals import signal_manager
-from services.earn import get_dual_investment_positions
-from core.database import is_dual_alerted, mark_dual_alerted
+from services.earn import get_dual_investment_positions, scan_dual_investment_targets
+from core.database import (
+    is_dual_alerted, 
+    mark_dual_alerted,
+    add_dual_target,
+    delete_dual_target,
+    get_dual_targets,
+    clear_dual_targets,
+    is_dual_scanned_alerted,
+    mark_dual_scanned_alerted
+)
 from bot.formatters import (
     format_apy_signal,
     format_funding_signal,
@@ -44,6 +53,8 @@ from bot.formatters import (
     format_country_pe_signal,
     format_daily_report,
     format_dual_settled,
+    format_dual_targets_list,
+    format_dual_scan_alert,
     WORLD_PE_STATUS_EMOJI,
     COUNTRY_STATUS_EMOJI,
     thailand_tz
@@ -75,7 +86,8 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /apy — Show current spot-futures APY spreads\n"
         "  /rate — Show BTC funding rate status\n"
         "  /maxpain — Show BTC Options Max Pain targets\n"
-        "  /earn — Show active Dual Investment contracts (alerts auto-fire on settlement)\n\n"
+        "  /earn — Show active Dual Investment contracts (alerts auto-fire on settlement)\n"
+        "  /dual — Manage Dual Investment scanner watch notes (add/del/list/scan)\n\n"
         "<b>🌍 Macro & Sentiment:</b>\n"
         "  /vix — Show Stock Market VIX index\n"
         "  /pe — Show World P/E Ratio & trends\n"
@@ -89,11 +101,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "  /status — System health, price latency & job status\n"
         "  /get — View all runtime parameters & settings\n"
         "  /set &lt;param&gt; &lt;value&gt; — Adjust threshold at runtime\n"
+        "  /arb on|off — Enable / disable arbitrage monitoring (default: off)\n"
         "  /stop &lt;job&gt; — Pause a background monitoring job\n"
         "  /start_job &lt;job&gt; — Resume a background job\n"
         "  /h — Show this help menu\n\n"
         "<b>📝 Settable Params:</b> <code>apy</code>, <code>vix_fear</code>, <code>vix_super</code>, <code>cooldown</code>, <code>ticks</code>, <code>thb</code>\n"
-        "<b>📝 Background Jobs:</b> <code>arbitrage</code>, <code>rate</code>, <code>vix</code>, <code>pe</code>, <code>fng</code>, <code>apy_tracker</code>, <code>thb</code>, <code>maxpain</code>, <code>vt</code>, <code>daily_report</code>, <code>country_pe</code>, <code>earn</code>"
+        "<b>📝 Background Jobs:</b> <code>arbitrage</code>, <code>rate</code>, <code>vix</code>, <code>pe</code>, <code>fng</code>, <code>apy_tracker</code>, <code>thb</code>, <code>maxpain</code>, <code>vt</code>, <code>daily_report</code>, <code>country_pe</code>, <code>earn</code>, <code>dual_scan</code>"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -356,6 +369,164 @@ async def earn_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
 
+def parse_target_line(line: str) -> Optional[Tuple[str, float, float, str]]:
+    """
+    Parses a single target line note like:
+    'btc 60000 10 buylow' -> ('BTC', 60000.0, 10.0, 'BUYLOW')
+    """
+    parts = line.strip().split()
+    if len(parts) < 4:
+        return None
+
+    coin = parts[0].upper().replace("$", "")
+    
+    raw_strike = parts[1].replace(",", "").replace("$", "")
+    try:
+        strike = float(raw_strike)
+    except ValueError:
+        return None
+
+    raw_apr = parts[2].replace("%", "")
+    try:
+        min_apr = float(raw_apr)
+    except ValueError:
+        return None
+
+    raw_opt = parts[3].lower().replace("_", "").replace("-", "")
+    if raw_opt in ("buylow", "put", "buy", "low"):
+        opt_type = "BUYLOW"
+    elif raw_opt in ("sellhigh", "call", "sell", "high"):
+        opt_type = "SELLHIGH"
+    else:
+        return None
+
+    return (coin, strike, min_apr, opt_type)
+
+
+async def dual_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    /dual — Manage Dual Investment watch targets & view current notes.
+    """
+    text = update.message.text or ""
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    
+    if not lines:
+        targets = get_dual_targets()
+        await update.message.reply_text(format_dual_targets_list(targets), parse_mode=ParseMode.HTML)
+        return
+
+    first_line_parts = lines[0].split(maxsplit=1)
+    first_arg_str = first_line_parts[1].strip() if len(first_line_parts) > 1 else ""
+
+    # Check single-line subcommands
+    if len(lines) == 1:
+        if not first_arg_str or first_arg_str.lower() in ("list", "show", "get"):
+            targets = get_dual_targets()
+            await update.message.reply_text(format_dual_targets_list(targets), parse_mode=ParseMode.HTML)
+            return
+
+        if first_arg_str.lower() in ("scan", "check", "run"):
+            await update.message.reply_text("🔎 Scanning Dual Investment market for watch targets...", parse_mode=ParseMode.HTML)
+            matches = scan_dual_investment_targets()
+            if not matches:
+                await update.message.reply_text("📭 No matching Dual Investment contracts found right now.", parse_mode=ParseMode.HTML)
+                return
+            for item in matches:
+                msg = format_dual_scan_alert(item["target"], item["product"], item["apr"], item["strike"])
+                await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+            return
+
+        if first_arg_str.lower() == "clear":
+            count = clear_dual_targets()
+            await update.message.reply_text(f"🗑️ Cleared <b>{count}</b> watch target note(s).", parse_mode=ParseMode.HTML)
+            return
+
+        if first_arg_str.lower().startswith(("del ", "delete ", "remove ", "rm ")):
+            parts = first_arg_str.split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                target_id = int(parts[1])
+                success = delete_dual_target(target_id)
+                if success:
+                    await update.message.reply_text(f"✅ Deleted watch note <code>#{target_id}</code>.", parse_mode=ParseMode.HTML)
+                else:
+                    await update.message.reply_text(f"❌ Target note <code>#{target_id}</code> not found.", parse_mode=ParseMode.HTML)
+                return
+
+    # Process notes to add
+    lines_to_parse = []
+    if len(lines) == 1:
+        arg_to_parse = first_arg_str
+        if arg_to_parse.lower().startswith("add "):
+            arg_to_parse = arg_to_parse[4:].strip()
+        lines_to_parse.append(arg_to_parse)
+    else:
+        if first_arg_str and first_arg_str.lower() != "add":
+            lines_to_parse.append(first_arg_str)
+        lines_to_parse.extend(lines[1:])
+
+    added_targets = []
+    failed_lines = []
+
+    for line in lines_to_parse:
+        parsed = parse_target_line(line)
+        if parsed:
+            coin, strike, apr, opt_type = parsed
+            tid = add_dual_target(coin, strike, apr, opt_type)
+            added_targets.append((tid, coin, strike, apr, opt_type))
+        else:
+            failed_lines.append(line)
+
+    if added_targets:
+        res_lines = [f"✅ Added <b>{len(added_targets)}</b> watch note(s):\n"]
+        for tid, coin, strike, apr, opt_type in added_targets:
+            badge = "🟢 Buy Low" if "buy" in opt_type.lower() or "put" in opt_type.lower() else "🔴 Sell High"
+            res_lines.append(f"  📌 <code>#{tid}</code> | <b>{coin}</b> ${strike:,.2f} | APR ≥ <b>{apr}%</b> | {badge}")
+        
+        if failed_lines:
+            res_lines.append("\n⚠️ <b>Could not parse:</b>")
+            for fl in failed_lines:
+                res_lines.append(f"  • <code>{fl}</code>")
+            res_lines.append("\n💡 <i>Format: <code>&lt;coin&gt; &lt;strike&gt; &lt;min_apr&gt; &lt;buylow|sellhigh&gt;</code></i>")
+            res_lines.append("🪙 <i>Example symbols: <code>BTC</code>, <code>ETH</code>, <code>BNB</code>, <code>SOL</code>, <code>XRP</code>, <code>DOGE</code>, <code>SUI</code></i>")
+
+        await update.message.reply_text("\n".join(res_lines), parse_mode=ParseMode.HTML)
+    else:
+        if failed_lines:
+            err_msg = (
+                "❌ <b>Could not parse watch target notes.</b>\n\n"
+                "<b>Example format:</b>\n"
+                "<code>btc 60000 10 buylow</code>\n"
+                "<code>eth 1700 15 buylow</code>\n"
+                "<code>eth 2500 3 sellhigh</code>\n"
+                "<code>sol 180 20 sellhigh</code>\n\n"
+                "🪙 <b>Example symbols:</b> <code>BTC</code>, <code>ETH</code>, <code>BNB</code>, <code>SOL</code>, <code>XRP</code>, <code>DOGE</code>, <code>ADA</code>, <code>AVAX</code>, <code>LINK</code>, <code>NEAR</code>, <code>SUI</code>"
+            )
+            await update.message.reply_text(err_msg, parse_mode=ParseMode.HTML)
+        else:
+            targets = get_dual_targets()
+            await update.message.reply_text(format_dual_targets_list(targets), parse_mode=ParseMode.HTML)
+
+
+async def dual_add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shortcut command: /dual_add <notes>"""
+    await dual_command(update, context)
+
+
+async def dual_del_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Shortcut command: /dual_del <id>"""
+    args = context.args
+    if not args or not args[0].isdigit():
+        await update.message.reply_text("❌ Usage: <code>/dual_del &lt;id&gt;</code>", parse_mode=ParseMode.HTML)
+        return
+    tid = int(args[0])
+    success = delete_dual_target(tid)
+    if success:
+        await update.message.reply_text(f"✅ Deleted watch note <code>#{tid}</code>.", parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(f"❌ Target note <code>#{tid}</code> not found.", parse_mode=ParseMode.HTML)
+
+
+
 # ══════════════════════════════════════════════════════════════════
 #  Interactive Control Commands
 # ══════════════════════════════════════════════════════════════════
@@ -392,7 +563,7 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/stop &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe, earn"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe, earn, dual_scan"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
@@ -408,13 +579,34 @@ async def start_job_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         text = (
             "❌ Usage: <code>/start_job &lt;job&gt;</code>\n\n"
-            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe, earn"
+            "<b>Available jobs:</b> arbitrage, rate, vix, pe, fng, apy_tracker, thb, maxpain, vt, daily_report, country_pe, earn, dual_scan"
         )
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
         return
 
     job_name = args[0].lower()
     result = BotConfig.set_job(job_name, enabled=True)
+    await update.message.reply_text(result, parse_mode=ParseMode.HTML)
+
+
+async def arb_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/arb on|off — Toggle arbitrage monitoring on or off."""
+    args = context.args
+    if not args or args[0].lower() not in ("on", "off"):
+        current = BotConfig.job_enabled.get("arbitrage", False)
+        icon = "\U0001f7e2" if current else "\U0001f534"
+        status = "Running" if current else "Stopped"
+        text = (
+            f"{icon} <b>Arbitrage Monitoring:</b> {status}\n\n"
+            "Usage:\n"
+            "  <code>/arb on</code>  — Start watching for APY spreads\n"
+            "  <code>/arb off</code> — Stop arbitrage monitoring"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        return
+
+    enable = args[0].lower() == "on"
+    result = BotConfig.set_job("arbitrage", enabled=enable)
     await update.message.reply_text(result, parse_mode=ParseMode.HTML)
 
 
@@ -730,6 +922,36 @@ async def daily_report_job(context: ContextTypes.DEFAULT_TYPE):
     )
 
     await send_alert(context, message)
+
+
+async def dual_scan_job(context: ContextTypes.DEFAULT_TYPE):
+    """Check Binance Dual Investment market against saved target watch notes."""
+    if not BotConfig.job_enabled.get("dual_scan", True):
+        return
+
+    try:
+        matches = scan_dual_investment_targets()
+    except Exception as e:
+        logger.error(f"Error in dual_scan_job: {e}")
+        return
+
+    for item in matches:
+        target = item["target"]
+        product = item["product"]
+        apr = item["apr"]
+        strike = item["strike"]
+
+        prod_id = str(product.get("id") or product.get("orderId") or "0")
+        target_id = target["id"]
+        settle_date = str(product.get("settleDate") or product.get("deliveryDate") or "0")
+        alert_key = f"dual_scan_{target_id}_{prod_id}_{settle_date}"
+
+        if is_dual_scanned_alerted(alert_key):
+            continue
+
+        message = format_dual_scan_alert(target, product, apr, strike)
+        await send_alert(context, message)
+        mark_dual_scanned_alerted(alert_key)
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):

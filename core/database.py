@@ -57,7 +57,27 @@ def init_db():
             timestamp INTEGER NOT NULL
         )
     ''')
-    
+
+    # Table for Dual Investment Target Watch List
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS dual_investment_targets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            coin TEXT NOT NULL,
+            strike_price REAL NOT NULL,
+            min_apr REAL NOT NULL,
+            option_type TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+    ''')
+
+    # Table for Dual Investment Scanner Alert Deduplication
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS dual_scanned_alerts (
+            alert_key TEXT PRIMARY KEY,
+            timestamp INTEGER NOT NULL
+        )
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -191,6 +211,70 @@ def is_dual_alerted(position_id: str) -> bool:
     conn.close()
     return row is not None
 
+def add_dual_target(coin: str, strike_price: float, min_apr: float, option_type: str) -> int:
+    """Adds a new Dual Investment watch target and returns its ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO dual_investment_targets (coin, strike_price, min_apr, option_type, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (coin.upper(), float(strike_price), float(min_apr), option_type.upper(), int(time.time())))
+    target_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return target_id
+
+def delete_dual_target(target_id: int) -> bool:
+    """Deletes a Dual Investment watch target by ID."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM dual_investment_targets WHERE id = ?', (target_id,))
+    deleted = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return deleted
+
+def get_dual_targets() -> list:
+    """Returns all active Dual Investment watch targets."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, coin, strike_price, min_apr, option_type, created_at FROM dual_investment_targets ORDER BY id ASC')
+    rows = cursor.fetchall()
+    targets = [dict(row) for row in rows]
+    conn.close()
+    return targets
+
+def clear_dual_targets() -> int:
+    """Deletes all Dual Investment watch targets."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM dual_investment_targets')
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+def mark_dual_scanned_alerted(alert_key: str):
+    """Marks a scanned Dual Investment opportunity as alerted."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('INSERT OR REPLACE INTO dual_scanned_alerts (alert_key, timestamp) VALUES (?, ?)', (alert_key, int(time.time())))
+    conn.commit()
+    conn.close()
+
+def is_dual_scanned_alerted(alert_key: str, cooldown_seconds: int = 86400) -> bool:
+    """Checks if a scanned opportunity has been alerted within cooldown period."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT timestamp FROM dual_scanned_alerts WHERE alert_key = ?', (alert_key,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return (int(time.time()) - row[0]) < cooldown_seconds
+    return False
+
 # Initialize DB on module load
 init_db()
+
 
